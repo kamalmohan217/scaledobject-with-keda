@@ -1,8 +1,25 @@
 ---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-service-monitor
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: order-service-folo
+  namespaceSelector:
+    matchNames:
+      - ordersystem
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 10s
+---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: spring-boot-producer-scaler
+  name: order-service-scaler
   namespace: ordersystem
 spec:
   scaleTargetRef:
@@ -11,10 +28,20 @@ spec:
     name: order-service-folo
   minReplicaCount: 1
   maxReplicaCount: 10
+  pollingInterval: 10
+  cooldownPeriod: 30
   triggers:
-  - type: kafka
-    metadata:
-      bootstrapServers: kafka-with-kraft.kafka.svc.cluster.local:9092
-      topic: order-events
-      consumerGroup: order-service-group
-      lagThreshold: "1"
+    # Kafka Lag Scaling
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-with-kraft.kafka.svc.cluster.local:9092
+        topic: order-events
+        consumerGroup: order-service-group
+        lagThreshold: "1"
+    # HTTP Request Scaling via Prometheus
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: http_requests_total
+        query: sum(increase(http_server_requests_seconds_count{method="PUT", uri="/orders"}[10s]))
+        threshold: "20"
